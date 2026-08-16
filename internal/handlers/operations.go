@@ -344,7 +344,12 @@ func (h *OperationsHandler) InviteStaff(w http.ResponseWriter, r *http.Request) 
 
 type StaffMemberResponse struct {
 	*models.StaffMembership
-	Email string `json:"email"`
+	Email           string  `json:"email"`
+	LeadsCount      int     `json:"leads_count"`
+	ViewingsCount   int     `json:"viewings_count"`
+	DealsClosed     int     `json:"deals_closed"`
+	PropertiesCount int     `json:"properties_count"`
+	TotalEarnings   float64 `json:"total_earnings"`
 }
 
 func (h *OperationsHandler) ListStaff(w http.ResponseWriter, r *http.Request) {
@@ -352,6 +357,51 @@ func (h *OperationsHandler) ListStaff(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	// Self-healing check for accepted invitations without staff memberships
+	allInvitations := h.Store.GetAllInvitations()
+	for _, inv := range allInvitations {
+		if inv.Status == models.InvitationStatusAccepted && (inv.Role == models.RoleStaff || inv.Role == models.RoleCaretaker || inv.Role == models.RoleAgent) {
+			var targetUser *models.User
+			var userErr error
+			if inv.Email != "" {
+				targetUser, userErr = h.Store.GetUserByEmail(inv.Email)
+			}
+			if userErr == nil && targetUser != nil {
+				exists := false
+				memberships := h.Store.GetAllStaffMemberships()
+				for _, m := range memberships {
+					if m.StaffUserID == targetUser.ID && m.PrincipalID == inv.SenderID {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					var assignedProps []string
+					if inv.PropertyID != "" {
+						assignedProps = []string{inv.PropertyID}
+					}
+					sm := &models.StaffMembership{
+						ID:                 uuid.New().String(),
+						StaffUserID:        targetUser.ID,
+						PrincipalID:        inv.SenderID,
+						PrincipalType:      models.RoleLandlord,
+						AssignedProperties: assignedProps,
+						AssignedRegions:    []string{"Nairobi"},
+						CanAutoPublish:     true,
+						Status:             "active",
+						InvitedAt:          inv.CreatedAt,
+						AcceptedAt:         time.Now(),
+					}
+					sender, senderExists := h.Store.GetUserByID(inv.SenderID)
+					if senderExists == nil && sender != nil {
+						sm.PrincipalType = sender.Role
+					}
+					h.Store.CreateStaffMembership(sm)
+				}
+			}
+		}
 	}
 
 	memberships := h.Store.GetAllStaffMemberships()
@@ -365,9 +415,48 @@ func (h *OperationsHandler) ListStaff(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				email = su.Email
 			}
+
+			// Compute performance metrics
+			leadsCount := 0
+			dealsClosed := 0
+			allLeads := h.Store.GetAllLeads()
+			for _, l := range allLeads {
+				if l.AssignedStaffID == m.StaffUserID {
+					leadsCount++
+					if l.Status == "converted" || l.Status == "closed" {
+						dealsClosed++
+					}
+				}
+			}
+
+			viewingsCount := 0
+			viewings := h.Store.GetViewingsByStaffID(m.StaffUserID)
+			viewingsCount = len(viewings)
+
+			propertiesCount := 0
+			allProps := h.Store.GetAllProperties()
+			for _, p := range allProps {
+				if p.CreatedBy == m.StaffUserID {
+					propertiesCount++
+				}
+			}
+
+			totalEarnings := 0.0
+			allComms := h.Store.GetAllCommissions()
+			for _, c := range allComms {
+				if c.StaffID == m.StaffUserID {
+					totalEarnings += c.Amount
+				}
+			}
+
 			list = append(list, StaffMemberResponse{
 				StaffMembership: m,
 				Email:           email,
+				LeadsCount:      leadsCount,
+				ViewingsCount:   viewingsCount,
+				DealsClosed:     dealsClosed,
+				PropertiesCount: propertiesCount,
+				TotalEarnings:   totalEarnings,
 			})
 		}
 	}
@@ -686,4 +775,37 @@ func (h *OperationsHandler) UpdateListing(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(listing)
+}
+
+func (h *OperationsHandler) DebugDB(w http.ResponseWriter, r *http.Request) {
+	type DebugResponse struct {
+		Users            []*models.User            `json:"users"`
+		Invitations      []*models.Invitation      `json:"invitations"`
+		StaffMemberships []*models.StaffMembership `json:"staff_memberships"`
+	}
+
+	h.Store.RLock()
+	defer h.Store.RUnlock()
+
+	var users []*models.User
+	for _, u := range h.Store.Users {
+		users = append(users, u)
+	}
+
+	var invites []*models.Invitation
+	for _, i := range h.Store.Invitations {
+		invites = append(invites, i)
+	}
+
+	var memberships []*models.StaffMembership
+	for _, m := range h.Store.StaffMemberships {
+		memberships = append(memberships, m)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(DebugResponse{
+		Users:            users,
+		Invitations:      invites,
+		StaffMemberships: memberships,
+	})
 }

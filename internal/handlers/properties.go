@@ -38,30 +38,55 @@ type PayRentRequest struct {
 	Amount  float64 `json:"amount"`
 }
 
+func (h *PropertiesHandler) GetUltimateOwnerID(userID string) string {
+	currentID := userID
+	visited := make(map[string]bool)
+	for {
+		if visited[currentID] {
+			break
+		}
+		visited[currentID] = true
+
+		u, err := h.Store.GetUserByID(currentID)
+		if err != nil {
+			break
+		}
+
+		if u.Role != models.RoleStaff && u.Role != models.RoleCaretaker && u.Role != models.RoleAgent {
+			break
+		}
+
+		memberships := h.Store.GetAllStaffMemberships()
+		var foundMembership *models.StaffMembership
+		for _, m := range memberships {
+			if m.StaffUserID == currentID && m.Status == "active" {
+				foundMembership = m
+				break
+			}
+		}
+
+		if foundMembership == nil {
+			break
+		}
+
+		currentID = foundMembership.PrincipalID
+	}
+	return currentID
+}
+
 func (h *PropertiesHandler) CreateProperty(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	ownerID, err := getUserIdFromAuthHeader(r, h.Store)
+	creatorID, err := getUserIdFromAuthHeader(r, h.Store)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	u, err := h.Store.GetUserByID(ownerID)
-	if err == nil {
-		if u.Role == models.RoleStaff || u.Role == models.RoleCaretaker {
-			memberships := h.Store.GetAllStaffMemberships()
-			for _, m := range memberships {
-				if m.StaffUserID == ownerID && m.Status == "active" {
-					ownerID = m.PrincipalID
-					break
-				}
-			}
-		}
-	}
+	ownerID := h.GetUltimateOwnerID(creatorID)
 
 	var p models.Property
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -76,6 +101,7 @@ func (h *PropertiesHandler) CreateProperty(w http.ResponseWriter, r *http.Reques
 
 	p.ID = uuid.New().String()
 	p.OwnerID = ownerID
+	p.CreatedBy = creatorID
 	p.ApprovalStatus = models.ApprovalPending
 	p.CreatedAt = time.Now()
 	p.UpdatedAt = time.Now()
@@ -86,6 +112,9 @@ func (h *PropertiesHandler) CreateProperty(w http.ResponseWriter, r *http.Reques
 	}
 
 	h.Store.CreateProperty(&p)
+
+	// Notify all associated users in real-time
+	BroadcastPropertySync(ownerID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -215,6 +244,11 @@ func (h *PropertiesHandler) CreateUnit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.Store.CreateUnit(unit)
+
+	// Fetch property to find owner landlord ID for sync
+	if prop, err := h.Store.GetPropertyByID(req.PropertyID); err == nil {
+		BroadcastPropertySync(prop.OwnerID)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

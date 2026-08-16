@@ -28,6 +28,7 @@ type ClientConn struct {
 var (
 	clients      = make(map[string][]*websocket.Conn)
 	clientsMutex sync.Mutex
+	dbStore      *store.Store
 )
 
 type WSMessage struct {
@@ -38,6 +39,7 @@ type WSMessage struct {
 }
 
 func HandleWS(s *store.Store) http.HandlerFunc {
+	dbStore = s
 	// Start background Redis listener once WS handler is loaded
 	go listenRedisPubSub()
 
@@ -269,4 +271,44 @@ func verifyToken(token string, s *store.Store) (string, error) {
 	}
 
 	return "", fmt.Errorf("unauthorized")
+}
+
+func BroadcastPropertySync(landlordID string) {
+	if dbStore == nil {
+		return
+	}
+
+	targetUsers := make(map[string]bool)
+	targetUsers[landlordID] = true
+
+	memberships := dbStore.GetAllStaffMemberships()
+	for _, m := range memberships {
+		if m.Status == "active" {
+			if m.PrincipalID == landlordID {
+				targetUsers[m.StaffUserID] = true
+				if m.PrincipalType == "agent" || m.PrincipalType == "landlord" {
+					for _, m2 := range memberships {
+						if m2.PrincipalID == m.StaffUserID && m2.Status == "active" {
+							targetUsers[m2.StaffUserID] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for uID := range targetUsers {
+		msg := WSMessage{
+			Type:      "property_sync",
+			UserID:    uID,
+			Payload:   map[string]string{"action": "reload"},
+			Timestamp: time.Now(),
+		}
+		bytes, _ := json.Marshal(msg)
+		if store.Redis != nil {
+			store.Redis.Publish("reos_events", string(bytes))
+		} else {
+			dispatchLocal(msg)
+		}
+	}
 }

@@ -272,6 +272,7 @@ func main() {
 	http.HandleFunc("/api/tiers/upgrade", corsMiddleware(opsHandler.UpgradeTier))
 	http.HandleFunc("/api/leads/list", corsMiddleware(opsHandler.ListLeads))
 	http.HandleFunc("/api/commissions/list", corsMiddleware(opsHandler.ListCommissions))
+	http.HandleFunc("/api/debug/db", corsMiddleware(opsHandler.DebugDB))
 
 	// Admin Actions
 	http.HandleFunc("/api/admin/gateway", corsMiddleware(adminOnly(dashHandler.UpdateGatewayConfig)))

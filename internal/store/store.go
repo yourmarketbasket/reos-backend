@@ -705,6 +705,16 @@ func (s *Store) GetInvitationsByLandlord(landlordID string) []*models.Invitation
 	return list
 }
 
+func (s *Store) GetAllInvitations() []*models.Invitation {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var list []*models.Invitation
+	for _, i := range s.Invitations {
+		list = append(list, i)
+	}
+	return list
+}
+
 func (s *Store) UpdateInvitationStatus(token string, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

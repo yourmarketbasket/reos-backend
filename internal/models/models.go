@@ -207,11 +207,12 @@ type RatingsSummary struct {
 // ─────────────────────────────────────────
 
 type Property struct {
-	ID       string `json:"id"`
-	OwnerID  string `json:"owner_id"`
-	RegionID string `json:"region_id"`
-	Name     string `json:"name"`
-	Slug     string `json:"slug"` // URL-friendly identifier
+	ID        string `json:"id"`
+	OwnerID   string `json:"owner_id"`
+	CreatedBy string `json:"created_by"`
+	RegionID  string `json:"region_id"`
+	Name      string `json:"name"`
+	Slug      string `json:"slug"` // URL-friendly identifier
 
 	// Description
 	Description string `json:"description"`
