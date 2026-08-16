@@ -151,6 +151,7 @@ func main() {
 	adminOnly := handlers.RequireRole(dbStore, models.RoleSuperAdmin)
 	caretakerOnly := handlers.RequireRole(dbStore, models.RoleCaretaker)
 	landlordOrAgentOnly := handlers.RequireRole(dbStore, models.RoleLandlord, models.RoleAgent)
+	landlordAgentOrStaffOnly := handlers.RequireRole(dbStore, models.RoleLandlord, models.RoleAgent, models.RoleStaff, models.RoleCaretaker)
 	anyAdmin := handlers.RequireRole(dbStore, models.RoleSuperAdmin, models.RoleSupportAdmin, models.RoleBillingAdmin, models.RoleTechAdmin)
 	
 	// canInvite: superadmin + all platform admins + landlord + agent
@@ -215,14 +216,14 @@ func main() {
 	http.HandleFunc("/api/invitations/debug", corsMiddleware(invHandler.DebugListInvitations))
 
 	// Properties, Units & Leases Endpoints
-	http.HandleFunc("/api/properties/create", corsMiddleware(landlordOrAgentOnly(propHandler.CreateProperty)))
+	http.HandleFunc("/api/properties/create", corsMiddleware(landlordAgentOrStaffOnly(propHandler.CreateProperty)))
 	http.HandleFunc("/api/properties/list", corsMiddleware(propHandler.ListProperties))
-	http.HandleFunc("/api/properties/update", corsMiddleware(landlordOrAgentOnly(propHandler.UpdateProperty)))
+	http.HandleFunc("/api/properties/update", corsMiddleware(landlordAgentOrStaffOnly(propHandler.UpdateProperty)))
 	http.HandleFunc("/api/properties/approve", corsMiddleware(adminOnly(propHandler.ApproveProperty)))
 	http.HandleFunc("/api/properties/reject", corsMiddleware(adminOnly(propHandler.RejectProperty)))
 	http.HandleFunc("/api/properties/review", corsMiddleware(propHandler.SubmitReview))
 	http.HandleFunc("/api/properties/review/respond", corsMiddleware(propHandler.RespondToReview))
-	http.HandleFunc("/api/units/create", corsMiddleware(landlordOrAgentOnly(propHandler.CreateUnit)))
+	http.HandleFunc("/api/units/create", corsMiddleware(landlordAgentOrStaffOnly(propHandler.CreateUnit)))
 	http.HandleFunc("/api/units/list", corsMiddleware(propHandler.ListUnits))
 	http.HandleFunc("/api/leases/list", corsMiddleware(propHandler.ListLeases))
 	http.HandleFunc("/api/payments/pay-rent", corsMiddleware(propHandler.PayRent))

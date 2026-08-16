@@ -6,6 +6,44 @@ import (
 	"github.com/reos/api/internal/store"
 )
 
+func ResolveUltimateOwnerID(s *store.Store, userID string) string {
+	currentID := userID
+	visited := make(map[string]bool)
+	for {
+		if visited[currentID] {
+			break
+		}
+		visited[currentID] = true
+
+		s.RLock()
+		u, err := s.GetUserByID(currentID)
+		s.RUnlock()
+		if err != nil {
+			break
+		}
+
+		if u.Role != models.RoleStaff && u.Role != models.RoleCaretaker && u.Role != models.RoleAgent {
+			break
+		}
+
+		memberships := s.GetAllStaffMemberships()
+		var foundMembership *models.StaffMembership
+		for _, m := range memberships {
+			if m.StaffUserID == currentID && m.Status == "active" {
+				foundMembership = m
+				break
+			}
+		}
+
+		if foundMembership == nil {
+			break
+		}
+
+		currentID = foundMembership.PrincipalID
+	}
+	return currentID
+}
+
 func CheckPropertyOwnership(s *store.Store, propertyID string, userID string) error {
 	s.RLock()
 	prop, ok := s.Properties[propertyID]
@@ -14,34 +52,27 @@ func CheckPropertyOwnership(s *store.Store, propertyID string, userID string) er
 		return errors.New("property not found")
 	}
 	
-	if prop.OwnerID == userID {
-		return nil
-	}
+	ownerLandlordID := ResolveUltimateOwnerID(s, prop.OwnerID)
+	userLandlordID := ResolveUltimateOwnerID(s, userID)
 
-	// Check if userID is a staff member of the owner
-	isStaff := false
-	memberships := s.GetAllStaffMemberships()
-	for _, m := range memberships {
-		if m.StaffUserID == userID && m.PrincipalID == prop.OwnerID && m.Status == "active" {
-			// If globally assigned to all principal's properties
-			if len(m.AssignedProperties) == 0 {
-				isStaff = true
-				break
-			}
-			// If assigned specifically to this property ID
-			for _, pid := range m.AssignedProperties {
-				if pid == propertyID {
-					isStaff = true
-					break
+	if ownerLandlordID == userLandlordID {
+		if userID == ownerLandlordID {
+			return nil
+		}
+
+		memberships := s.GetAllStaffMemberships()
+		for _, m := range memberships {
+			if m.StaffUserID == userID && m.Status == "active" {
+				if len(m.AssignedProperties) == 0 {
+					return nil
+				}
+				for _, pid := range m.AssignedProperties {
+					if pid == propertyID {
+						return nil
+					}
 				}
 			}
-			if isStaff {
-				break
-			}
 		}
-	}
-
-	if isStaff {
 		return nil
 	}
 
