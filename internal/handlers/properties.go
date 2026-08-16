@@ -50,6 +50,19 @@ func (h *PropertiesHandler) CreateProperty(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	u, err := h.Store.GetUserByID(ownerID)
+	if err == nil {
+		if u.Role == models.RoleStaff || u.Role == models.RoleCaretaker {
+			memberships := h.Store.GetAllStaffMemberships()
+			for _, m := range memberships {
+				if m.StaffUserID == ownerID && m.Status == "active" {
+					ownerID = m.PrincipalID
+					break
+				}
+			}
+		}
+	}
+
 	var p models.Property
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -102,8 +115,52 @@ func (h *PropertiesHandler) ListProperties(w http.ResponseWriter, r *http.Reques
 			list = h.Store.GetPropertiesByOwner(userID)
 		} else if u.Role == models.RoleSuperAdmin || u.Role == models.RoleTechAdmin || u.Role == models.RoleSupportAdmin {
 			list = h.Store.GetAllProperties()
+		} else if u.Role == models.RoleStaff || u.Role == models.RoleCaretaker {
+			memberships := h.Store.GetAllStaffMemberships()
+			var principalIDs []string
+			var specificPropIDs []string
+			globalAllForPrincipal := false
+
+			for _, m := range memberships {
+				if m.StaffUserID == userID && m.Status == "active" {
+					principalIDs = append(principalIDs, m.PrincipalID)
+					if len(m.AssignedProperties) == 0 {
+						globalAllForPrincipal = true
+					} else {
+						specificPropIDs = append(specificPropIDs, m.AssignedProperties...)
+					}
+				}
+			}
+
+			allProps := h.Store.GetAllProperties()
+			for _, p := range allProps {
+				if globalAllForPrincipal {
+					isPrincipalOwner := false
+					for _, pid := range principalIDs {
+						if p.OwnerID == pid {
+							isPrincipalOwner = true
+							break
+						}
+					}
+					if isPrincipalOwner {
+						list = append(list, p)
+						continue
+					}
+				}
+
+				isSpecific := false
+				for _, spid := range specificPropIDs {
+					if p.ID == spid {
+						isSpecific = true
+						break
+					}
+				}
+				if isSpecific {
+					list = append(list, p)
+				}
+			}
 		} else {
-			// regular clients/tenants/caretakers see only approved properties
+			// regular clients/tenants see only approved properties
 			all := h.Store.GetAllProperties()
 			for _, p := range all {
 				if p.ApprovalStatus == models.ApprovalApproved {

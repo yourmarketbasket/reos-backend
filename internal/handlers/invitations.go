@@ -96,13 +96,8 @@ func (h *InvitationsHandler) CreateInvitation(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	if !isAdminRole && req.PropertyID == "" {
-		http.Error(w, "PropertyID is required", http.StatusBadRequest)
-		return
-	}
-
 	var propName = "System Platform"
-	if !isAdminRole {
+	if req.PropertyID != "" {
 		// Verify property exists
 		h.Store.RLock()
 		prop, ok := h.Store.Properties[req.PropertyID]
@@ -112,6 +107,9 @@ func (h *InvitationsHandler) CreateInvitation(w http.ResponseWriter, r *http.Req
 			return
 		}
 		propName = prop.Name
+	} else if role == models.RoleTenant {
+		http.Error(w, "PropertyID is required for tenant invitations", http.StatusBadRequest)
+		return
 	}
 
 	// Check 1: reject if email already belongs to a registered user
@@ -619,8 +617,8 @@ func getUserIdFromAuthHeader(r *http.Request, s *store.Store) (string, error) {
 		return "", fmt.Errorf("invalid token format")
 	}
 
-	s.Lock()
-	defer s.Unlock()
+	s.RLock()
+	defer s.RUnlock()
 
 	var matchedUser *models.User
 	for _, u := range s.Users {

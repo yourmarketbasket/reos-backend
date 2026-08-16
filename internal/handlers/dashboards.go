@@ -357,6 +357,24 @@ func (h *DashboardsHandler) GetDashboardStats(w http.ResponseWriter, r *http.Req
 		stats["commissions_earned"] = commissions
 		stats["properties_submitted"] = 2
 		stats["rating"] = 4.8
+
+		principalType := "landlord"
+		principalName := "REOS Partner"
+		for _, m := range h.Store.StaffMemberships {
+			if m.StaffUserID == userID && m.Status == "active" {
+				principalType = m.PrincipalType
+				pu, err := h.Store.GetUserByID(m.PrincipalID)
+				if err == nil {
+					principalName = pu.Email
+					if pu.Phone != "" {
+						principalName = pu.Phone
+					}
+				}
+				break
+			}
+		}
+		stats["principal_type"] = principalType
+		stats["principal_name"] = principalName
 	}
 
 	w.Header().Set("Content-Type", "application/json")

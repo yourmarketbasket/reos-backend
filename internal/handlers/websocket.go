@@ -251,8 +251,8 @@ func verifyToken(token string, s *store.Store) (string, error) {
 		return "", fmt.Errorf("invalid token format")
 	}
 
-	s.Lock()
-	defer s.Unlock()
+	s.RLock()
+	defer s.RUnlock()
 
 	for _, u := range s.Users {
 		for _, sess := range u.Sessions {
