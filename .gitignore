@@ -1,0 +1,64 @@
+# ##############################################################################
+# REOS - API Gitignore (Go Project)
+# ##############################################################################
+
+# Binaries and executable outputs
+/server
+/api
+/cmd/server/server
+/cmd/api/api
+/bin/
+/out/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test, coverage, and profiling outputs
+*.test
+*.out
+*.prof
+c.out
+coverage.txt
+coverage.html
+profile.out
+
+# Dependency directory (if using 'go mod vendor')
+# Uncomment if you vendor your dependencies
+# /vendor/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+.config
+config.yaml
+config.json
+secrets.json
+
+# Local Uploads / Media Storage (ignore uploads but preserve directory)
+/uploads/*
+!/uploads/.gitkeep
+
+# IDEs, Editors, and Workspace Configuration
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+.elixir_ls/
+.project
+.settings/
+.classpath
+
+# Operating System specific files
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
