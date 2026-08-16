@@ -1,0 +1,4 @@
+name = 'reos-api'
+slug = 'reos-api-ortox'
+ram_size = 2048
+vcpu = 64.0
