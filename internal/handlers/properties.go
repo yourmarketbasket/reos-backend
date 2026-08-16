@@ -461,10 +461,10 @@ func (h *PropertiesHandler) ApproveProperty(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	h.Store.Lock()
+	h.Store.RLock()
 	prop, ok := h.Store.Properties[req.ID]
+	h.Store.RUnlock()
 	if !ok {
-		h.Store.Unlock()
 		http.Error(w, "Property not found", http.StatusNotFound)
 		return
 	}
@@ -482,11 +482,11 @@ func (h *PropertiesHandler) ApproveProperty(w http.ResponseWriter, r *http.Reque
 	}
 
 	if !isAllowed {
-		h.Store.Unlock()
 		http.Error(w, "Forbidden: you do not have permission to approve this property", http.StatusForbidden)
 		return
 	}
 
+	h.Store.Lock()
 	now := time.Now()
 	prop.ApprovalStatus = models.ApprovalApproved
 	prop.ApprovalNote = req.Note
@@ -496,6 +496,9 @@ func (h *PropertiesHandler) ApproveProperty(w http.ResponseWriter, r *http.Reque
 	h.Store.Unlock()
 
 	h.Store.CreateProperty(prop) // writes update to db
+
+	// Dispatch real-time WebSocket sync update
+	BroadcastPropertySync(prop.OwnerID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(prop)
@@ -528,10 +531,10 @@ func (h *PropertiesHandler) RejectProperty(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	h.Store.Lock()
+	h.Store.RLock()
 	prop, ok := h.Store.Properties[req.ID]
+	h.Store.RUnlock()
 	if !ok {
-		h.Store.Unlock()
 		http.Error(w, "Property not found", http.StatusNotFound)
 		return
 	}
@@ -549,11 +552,11 @@ func (h *PropertiesHandler) RejectProperty(w http.ResponseWriter, r *http.Reques
 	}
 
 	if !isAllowed {
-		h.Store.Unlock()
 		http.Error(w, "Forbidden: you do not have permission to reject this property", http.StatusForbidden)
 		return
 	}
 
+	h.Store.Lock()
 	now := time.Now()
 	prop.ApprovalStatus = models.ApprovalRejected
 	prop.ApprovalNote = req.Note
@@ -563,6 +566,9 @@ func (h *PropertiesHandler) RejectProperty(w http.ResponseWriter, r *http.Reques
 	h.Store.Unlock()
 
 	h.Store.CreateProperty(prop)
+
+	// Dispatch real-time WebSocket sync update
+	BroadcastPropertySync(prop.OwnerID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(prop)
