@@ -414,6 +414,34 @@ func (h *InvitationsHandler) AcceptInvitation(w http.ResponseWriter, r *http.Req
 		}
 	}
 
+	if inv.Role == models.RoleStaff || inv.Role == models.RoleCaretaker || inv.Role == models.RoleAgent {
+		var assignedProps []string
+		if inv.PropertyID != "" {
+			assignedProps = []string{inv.PropertyID}
+		}
+		sm := &models.StaffMembership{
+			ID:                 uuid.New().String(),
+			StaffUserID:        user.ID,
+			PrincipalID:        inv.SenderID,
+			PrincipalType:      models.RoleLandlord,
+			AssignedProperties: assignedProps,
+			AssignedRegions:    []string{"Nairobi"},
+			CanAutoPublish:     true,
+			Status:             "active",
+			InvitedAt:          inv.CreatedAt,
+			AcceptedAt:         time.Now(),
+		}
+
+		h.Store.RLock()
+		sender, senderExists := h.Store.Users[inv.SenderID]
+		h.Store.RUnlock()
+		if senderExists {
+			sm.PrincipalType = sender.Role
+		}
+
+		h.Store.CreateStaffMembership(sm)
+	}
+
 	token := "session_" + user.ID
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(AuthResponse{Token: token, User: user})

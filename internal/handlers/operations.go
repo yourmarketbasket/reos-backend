@@ -332,9 +332,19 @@ func (h *OperationsHandler) InviteStaff(w http.ResponseWriter, r *http.Request) 
 
 	h.Store.CreateStaffMembership(sm)
 
+	res := StaffMemberResponse{
+		StaffMembership: sm,
+		Email:           staffUser.Email,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(sm)
+	json.NewEncoder(w).Encode(res)
+}
+
+type StaffMemberResponse struct {
+	*models.StaffMembership
+	Email string `json:"email"`
 }
 
 func (h *OperationsHandler) ListStaff(w http.ResponseWriter, r *http.Request) {
@@ -345,10 +355,20 @@ func (h *OperationsHandler) ListStaff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	memberships := h.Store.GetAllStaffMemberships()
-	var list []*models.StaffMembership
+	var list []StaffMemberResponse
 	for _, m := range memberships {
 		if m.PrincipalID == userID || m.StaffUserID == userID {
-			list = append(list, m)
+			email := ""
+			h.Store.RLock()
+			su, err := h.Store.GetUserByID(m.StaffUserID)
+			h.Store.RUnlock()
+			if err == nil {
+				email = su.Email
+			}
+			list = append(list, StaffMemberResponse{
+				StaffMembership: m,
+				Email:           email,
+			})
 		}
 	}
 
