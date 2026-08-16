@@ -144,7 +144,7 @@ func (h *PropertiesHandler) ListProperties(w http.ResponseWriter, r *http.Reques
 			list = h.Store.GetPropertiesByOwner(userID)
 		} else if u.Role == models.RoleSuperAdmin || u.Role == models.RoleTechAdmin || u.Role == models.RoleSupportAdmin {
 			list = h.Store.GetAllProperties()
-		} else if u.Role == models.RoleStaff || u.Role == models.RoleCaretaker {
+		} else if u.Role == models.RoleStaff || u.Role == models.RoleCaretaker || u.Role == models.RoleAgent {
 			memberships := h.Store.GetAllStaffMemberships()
 			var principalIDs []string
 			var specificPropIDs []string
@@ -163,6 +163,11 @@ func (h *PropertiesHandler) ListProperties(w http.ResponseWriter, r *http.Reques
 
 			allProps := h.Store.GetAllProperties()
 			for _, p := range allProps {
+				if p.CreatedBy == userID {
+					list = append(list, p)
+					continue
+				}
+
 				if globalAllForPrincipal {
 					isPrincipalOwner := false
 					for _, pid := range principalIDs {
@@ -442,8 +447,8 @@ func (h *PropertiesHandler) ApproveProperty(w http.ResponseWriter, r *http.Reque
 	}
 
 	user, err := h.Store.GetUserByID(userID)
-	if err != nil || (user.Role != models.RoleSuperAdmin && user.Role != models.RoleSupportAdmin) {
-		http.Error(w, "Forbidden: admin only", http.StatusForbidden)
+	if err != nil {
+		http.Error(w, "Forbidden: user not found", http.StatusForbidden)
 		return
 	}
 
@@ -461,6 +466,24 @@ func (h *PropertiesHandler) ApproveProperty(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		h.Store.Unlock()
 		http.Error(w, "Property not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify permission to approve
+	isAllowed := false
+	if user.Role == models.RoleSuperAdmin || user.Role == models.RoleSupportAdmin {
+		isAllowed = true
+	} else {
+		ultimatePropOwner := ResolveUltimateOwnerID(h.Store, prop.OwnerID)
+		ultimateUser := ResolveUltimateOwnerID(h.Store, userID)
+		if ultimatePropOwner == userID || ultimatePropOwner == ultimateUser {
+			isAllowed = true
+		}
+	}
+
+	if !isAllowed {
+		h.Store.Unlock()
+		http.Error(w, "Forbidden: you do not have permission to approve this property", http.StatusForbidden)
 		return
 	}
 
@@ -491,8 +514,8 @@ func (h *PropertiesHandler) RejectProperty(w http.ResponseWriter, r *http.Reques
 	}
 
 	user, err := h.Store.GetUserByID(userID)
-	if err != nil || (user.Role != models.RoleSuperAdmin && user.Role != models.RoleSupportAdmin) {
-		http.Error(w, "Forbidden: admin only", http.StatusForbidden)
+	if err != nil {
+		http.Error(w, "Forbidden: user not found", http.StatusForbidden)
 		return
 	}
 
@@ -510,6 +533,24 @@ func (h *PropertiesHandler) RejectProperty(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		h.Store.Unlock()
 		http.Error(w, "Property not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify permission to reject
+	isAllowed := false
+	if user.Role == models.RoleSuperAdmin || user.Role == models.RoleSupportAdmin {
+		isAllowed = true
+	} else {
+		ultimatePropOwner := ResolveUltimateOwnerID(h.Store, prop.OwnerID)
+		ultimateUser := ResolveUltimateOwnerID(h.Store, userID)
+		if ultimatePropOwner == userID || ultimatePropOwner == ultimateUser {
+			isAllowed = true
+		}
+	}
+
+	if !isAllowed {
+		h.Store.Unlock()
+		http.Error(w, "Forbidden: you do not have permission to reject this property", http.StatusForbidden)
 		return
 	}
 
