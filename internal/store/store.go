@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -125,8 +126,15 @@ func NewStore() *Store {
 			err = client.Ping(ctx, nil)
 			if err == nil {
 				s.mongoClient = client
-				s.db = client.Database("reos")
-				fmt.Println("Successfully connected to MongoDB!")
+				dbName := "reos"
+				if parsed, err := url.Parse(mongoURI); err == nil && parsed.Path != "" {
+					trimmed := strings.TrimPrefix(parsed.Path, "/")
+					if trimmed != "" {
+						dbName = trimmed
+					}
+				}
+				s.db = client.Database(dbName)
+				fmt.Printf("Successfully connected to MongoDB database '%s'!\n", dbName)
 
 				// Purge old preseeded credentials to enforce registering first
 				purgeCtx, purgeCancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -18,6 +18,9 @@ var Redis *RedisClient
 func InitRedis() {
 	redisURI := os.Getenv("REDIS_URI")
 	if redisURI == "" {
+		redisURI = os.Getenv("REDIS_URL")
+	}
+	if redisURI == "" {
 		redisURI = "redis://localhost:6379"
 	}
 
