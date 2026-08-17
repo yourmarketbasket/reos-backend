@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
-	"context"
 	"github.com/reos/api/internal/handlers"
 	"github.com/reos/api/internal/models"
 	"github.com/reos/api/internal/store"
@@ -80,6 +83,15 @@ func claimNisokoHandles(s *store.Store) {
 	_, _ = col.InsertOne(ctx, bson.M{"key": "nisoko_setup_done", "done": true, "updated_at": time.Now()})
 }
 
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (w gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -88,6 +100,16 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Compress response using Gzip if the client supports it and this is not a WebSocket upgrade request
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && r.Header.Get("Upgrade") == "" {
+			w.Header().Set("Content-Encoding", "gzip")
+			gz := gzip.NewWriter(w)
+			defer gz.Close()
+			gzw := gzipResponseWriter{Writer: gz, ResponseWriter: w}
+			next(gzw, r)
 			return
 		}
 
