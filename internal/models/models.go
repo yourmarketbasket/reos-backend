@@ -53,6 +53,12 @@ const (
 	ApprovalRejected = "rejected"
 )
 
+// Property publish statuses (landlord-controlled, independent of admin approval)
+const (
+	PublishStatusDraft     = "draft"
+	PublishStatusPublished = "published"
+)
+
 // Unit statuses
 const (
 	UnitStatusAvailable        = "available"
@@ -275,6 +281,13 @@ type Property struct {
 	ApprovalNote   string     `json:"approval_note,omitempty"`
 	ApprovedBy     string     `json:"approved_by,omitempty"`
 	ApprovedAt     *time.Time `json:"approved_at,omitempty"`
+
+	// Landlord-controlled publish lifecycle (independent of admin approval)
+	PublishStatus string `json:"publish_status"` // draft | published
+
+	// Hero carousel — landlord pays for featured placement
+	IsFeatured    bool       `json:"is_featured"`
+	FeaturedUntil *time.Time `json:"featured_until,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

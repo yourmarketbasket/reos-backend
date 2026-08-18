@@ -243,6 +243,8 @@ func main() {
 	http.HandleFunc("/api/properties/update", corsMiddleware(landlordAgentOrStaffOnly(propHandler.UpdateProperty)))
 	http.HandleFunc("/api/properties/approve", corsMiddleware(propHandler.ApproveProperty))
 	http.HandleFunc("/api/properties/reject", corsMiddleware(propHandler.RejectProperty))
+	http.HandleFunc("/api/properties/publish", corsMiddleware(landlordAgentOrStaffOnly(propHandler.PublishProperty)))
+	http.HandleFunc("/api/properties/unpublish", corsMiddleware(landlordAgentOrStaffOnly(propHandler.UnpublishProperty)))
 	http.HandleFunc("/api/properties/review", corsMiddleware(propHandler.SubmitReview))
 	http.HandleFunc("/api/properties/review/respond", corsMiddleware(propHandler.RespondToReview))
 	http.HandleFunc("/api/units/create", corsMiddleware(landlordAgentOrStaffOnly(propHandler.CreateUnit)))

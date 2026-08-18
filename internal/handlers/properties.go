@@ -103,6 +103,7 @@ func (h *PropertiesHandler) CreateProperty(w http.ResponseWriter, r *http.Reques
 	p.OwnerID = ownerID
 	p.CreatedBy = creatorID
 	p.ApprovalStatus = models.ApprovalPending
+	p.PublishStatus = models.PublishStatusDraft
 	p.CreatedAt = time.Now()
 	p.UpdatedAt = time.Now()
 	p.Reviews = []models.PropertyReview{}
@@ -126,10 +127,10 @@ func (h *PropertiesHandler) ListProperties(w http.ResponseWriter, r *http.Reques
 	var list []*models.Property
 
 	if err != nil {
-		// Guest user: return only approved properties
+		// Guest user: return only approved AND published properties
 		all := h.Store.GetAllProperties()
 		for _, p := range all {
-			if p.ApprovalStatus == models.ApprovalApproved {
+			if p.ApprovalStatus == models.ApprovalApproved && p.PublishStatus == models.PublishStatusPublished {
 				list = append(list, p)
 			}
 		}
@@ -194,10 +195,10 @@ func (h *PropertiesHandler) ListProperties(w http.ResponseWriter, r *http.Reques
 				}
 			}
 		} else {
-			// regular clients/tenants see only approved properties
+			// regular clients/tenants see only approved AND published properties
 			all := h.Store.GetAllProperties()
 			for _, p := range all {
-				if p.ApprovalStatus == models.ApprovalApproved {
+				if p.ApprovalStatus == models.ApprovalApproved && p.PublishStatus == models.PublishStatusPublished {
 					list = append(list, p)
 				}
 			}
@@ -808,4 +809,107 @@ func (h *PropertiesHandler) RespondToReview(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "responded"})
+}
+
+// PublishProperty sets a property's publish_status to "published".
+// Requires: caller owns the property AND the property has at least one image.
+func (h *PropertiesHandler) PublishProperty(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := getUserIdFromAuthHeader(r, h.Store)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		http.Error(w, "Property ID is required", http.StatusBadRequest)
+		return
+	}
+
+	h.Store.Lock()
+	prop, ok := h.Store.Properties[req.ID]
+	if !ok {
+		h.Store.Unlock()
+		http.Error(w, "Property not found", http.StatusNotFound)
+		return
+	}
+
+	// Only the owner (or their staff) may publish
+	ownerID := h.GetUltimateOwnerID(userID)
+	if prop.OwnerID != userID && prop.OwnerID != ownerID {
+		h.Store.Unlock()
+		http.Error(w, "Forbidden: you do not own this property", http.StatusForbidden)
+		return
+	}
+
+	// Image gate: must have at least one image to publish
+	if len(prop.Images) == 0 {
+		h.Store.Unlock()
+		http.Error(w, "Cannot publish: property must have at least one image before publishing", http.StatusBadRequest)
+		return
+	}
+
+	prop.PublishStatus = models.PublishStatusPublished
+	prop.UpdatedAt = time.Now()
+	h.Store.Unlock()
+
+	h.Store.CreateProperty(prop)
+	BroadcastPropertySync(prop.OwnerID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(prop)
+}
+
+// UnpublishProperty sets a property's publish_status back to "draft".
+func (h *PropertiesHandler) UnpublishProperty(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := getUserIdFromAuthHeader(r, h.Store)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		http.Error(w, "Property ID is required", http.StatusBadRequest)
+		return
+	}
+
+	h.Store.Lock()
+	prop, ok := h.Store.Properties[req.ID]
+	if !ok {
+		h.Store.Unlock()
+		http.Error(w, "Property not found", http.StatusNotFound)
+		return
+	}
+
+	ownerID := h.GetUltimateOwnerID(userID)
+	if prop.OwnerID != userID && prop.OwnerID != ownerID {
+		h.Store.Unlock()
+		http.Error(w, "Forbidden: you do not own this property", http.StatusForbidden)
+		return
+	}
+
+	prop.PublishStatus = models.PublishStatusDraft
+	prop.UpdatedAt = time.Now()
+	h.Store.Unlock()
+
+	h.Store.CreateProperty(prop)
+	BroadcastPropertySync(prop.OwnerID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(prop)
 }
