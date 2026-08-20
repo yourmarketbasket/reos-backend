@@ -1,4 +1,4 @@
-package handlers
+package middleware
 
 import (
 	"fmt"
@@ -36,10 +36,10 @@ func (rl *RateLimiter) Limit(ip string) bool {
 	lim, exists := rl.ips[ip]
 	if !exists {
 		rl.ips[ip] = &ipLimiter{
-			tokens:     rl.burst - 1, // first request consumes 1 token
+			tokens:     rl.burst - 1,
 			lastUpdate: time.Now(),
 		}
-		return false // Allowed
+		return false
 	}
 
 	now := time.Now()
@@ -53,10 +53,10 @@ func (rl *RateLimiter) Limit(ip string) bool {
 
 	if lim.tokens >= 1 {
 		lim.tokens -= 1
-		return false // Allowed
+		return false
 	}
 
-	return true // Rate limited
+	return true
 }
 
 func getIP(r *http.Request) string {
@@ -72,7 +72,6 @@ func getIP(r *http.Request) string {
 	return ip
 }
 
-// RateLimit creates a middleware with custom rps and burst
 func RateLimit(rps float64, burst float64) func(http.Handler) http.Handler {
 	limiter := NewRateLimiter(rps, burst)
 	return func(next http.Handler) http.Handler {
@@ -88,13 +87,12 @@ func RateLimit(rps float64, burst float64) func(http.Handler) http.Handler {
 }
 
 var (
-	AuthLimiter      = NewRateLimiter(10.0/60.0, 10)
-	InviteLimiter    = NewRateLimiter(5.0/60.0, 5)
-	UploadLimiter    = NewRateLimiter(20.0/60.0, 20)
-	GeneralLimiter   = NewRateLimiter(120.0/60.0, 120)
+	AuthLimiter    = NewRateLimiter(10.0/60.0, 10)
+	InviteLimiter  = NewRateLimiter(5.0/60.0, 5)
+	UploadLimiter  = NewRateLimiter(20.0/60.0, 20)
+	GeneralLimiter = NewRateLimiter(120.0/60.0, 120)
 )
 
-// DynamicRateLimit middleware selects rate limiter based on path
 func DynamicRateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := getIP(r)
@@ -122,7 +120,6 @@ func DynamicRateLimit(next http.Handler) http.Handler {
 	})
 }
 
-// SecurityHeaders applies protective headers to prevent injection and frame issues
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -135,7 +132,6 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// RequestSizeLimit limits the size of request body to protect memory resources
 func RequestSizeLimit(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -145,19 +141,17 @@ func RequestSizeLimit(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// DynamicRequestSizeLimit selects size limit based on path (e.g. 10MB for uploads, 1MB others)
 func DynamicRequestSizeLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var maxBytes int64 = 1024 * 1024 // default 1MB
+		var maxBytes int64 = 1024 * 1024 // 1MB
 		if strings.HasPrefix(r.URL.Path, "/api/uploads/") {
-			maxBytes = 10 * 1024 * 1024 // 10MB for uploads
+			maxBytes = 10 * 1024 * 1024 // 10MB
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 		next.ServeHTTP(w, r)
 	})
 }
 
-// IPAllowlist rejects requests from IPs not in list (if needed)
 func IPAllowlist(allowed []string) func(http.Handler) http.Handler {
 	allowedMap := make(map[string]bool)
 	for _, ip := range allowed {

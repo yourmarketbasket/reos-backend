@@ -299,18 +299,37 @@ func (h *PropertiesHandler) ListLeases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.Store.RLock()
+	var rawLeases []*models.Lease
+	for _, lease := range h.Store.Leases {
+		rawLeases = append(rawLeases, lease)
+	}
+	h.Store.RUnlock()
+
 	var list []*models.Lease
-	if u.Role == models.RoleTenant {
+	isAdmin := u.Role == models.RoleSuperAdmin || u.Role == models.RoleTechAdmin || u.Role == models.RoleSupportAdmin || u.Role == models.RoleBillingAdmin
+
+	if isAdmin {
+		list = rawLeases
+	} else if u.Role == models.RoleTenant || u.Role == models.RoleClient {
 		list = h.Store.GetLeasesByTenant(userID)
-	} else if u.Role == models.RoleLandlord {
-		list = h.Store.GetLeasesByLandlord(userID)
 	} else {
-		// caretaker/agent/superadmin can see all leases for simplicity in this MVP mockup
-		h.Store.RLock()
-		for _, lease := range h.Store.Leases {
-			list = append(list, lease)
+		// Landlord, Agent, Caretaker, Staff
+		for _, lease := range rawLeases {
+			h.Store.RLock()
+			unit, hasUnit := h.Store.Units[lease.UnitID]
+			h.Store.RUnlock()
+
+			if hasUnit {
+				if CheckPropertyOwnership(h.Store, unit.PropertyID, userID) == nil {
+					list = append(list, lease)
+				}
+			}
 		}
-		h.Store.RUnlock()
+	}
+
+	if list == nil {
+		list = []*models.Lease{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -422,13 +441,36 @@ func (h *PropertiesHandler) ListLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	allLedger := h.Store.GetAllLedger()
 	var list []*models.LedgerEntry
-	if u.Role == models.RoleTenant {
+	isAdmin := u.Role == models.RoleSuperAdmin || u.Role == models.RoleTechAdmin || u.Role == models.RoleSupportAdmin || u.Role == models.RoleBillingAdmin
+
+	if isAdmin {
+		list = allLedger
+	} else if u.Role == models.RoleTenant || u.Role == models.RoleClient {
 		list = h.Store.GetLedgerByTenant(userID)
-	} else if u.Role == models.RoleLandlord {
-		list = h.Store.GetLedgerByLandlord(userID)
-	} else {
-		list = h.Store.GetAllLedger()
+	} else if u.Role == models.RoleLandlord || u.Role == models.RoleAgent || u.Role == models.RoleStaff {
+		for _, entry := range allLedger {
+			h.Store.RLock()
+			lease, hasLease := h.Store.Leases[entry.LeaseID]
+			var unitPropertyID string
+			if hasLease {
+				if unit, hasUnit := h.Store.Units[lease.UnitID]; hasUnit {
+					unitPropertyID = unit.PropertyID
+				}
+			}
+			h.Store.RUnlock()
+
+			if unitPropertyID != "" {
+				if CheckPropertyOwnership(h.Store, unitPropertyID, userID) == nil {
+					list = append(list, entry)
+				}
+			}
+		}
+	}
+
+	if list == nil {
+		list = []*models.LedgerEntry{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

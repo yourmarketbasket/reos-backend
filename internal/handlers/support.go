@@ -425,13 +425,36 @@ func (h *SupportHandler) ListInspections(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	userID, err := getUserIdFromAuthHeader(r, h.Store)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	leaseID := r.URL.Query().Get("lease_id")
 	if leaseID == "" {
 		http.Error(w, "lease_id query parameter is required", http.StatusBadRequest)
 		return
 	}
 
+	u, err := h.Store.GetUserByID(userID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
+	}
+
+	isAdmin := u.Role == models.RoleSuperAdmin || u.Role == models.RoleTechAdmin || u.Role == models.RoleSupportAdmin || u.Role == models.RoleBillingAdmin
+	if !isAdmin {
+		if err := CheckLeaseAccess(h.Store, leaseID, userID); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+	}
+
 	list := h.Store.GetInspectionsByLeaseID(leaseID)
+	if list == nil {
+		list = []*models.Inspection{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(list)
@@ -494,14 +517,57 @@ func (h *SupportHandler) ListDeductions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.Store.Lock()
-	defer h.Store.Unlock()
+	userID, err := getUserIdFromAuthHeader(r, h.Store)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
-	var list []*models.LedgerEntry
+	u, err := h.Store.GetUserByID(userID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
+	}
+
+	h.Store.RLock()
+	var rawDeductions []*models.LedgerEntry
 	for _, entry := range h.Store.Ledger {
 		if entry.Type == "deduction" {
-			list = append(list, entry)
+			rawDeductions = append(rawDeductions, entry)
 		}
+	}
+	h.Store.RUnlock()
+
+	var list []*models.LedgerEntry
+	for _, entry := range rawDeductions {
+		if u.Role == models.RoleSuperAdmin || u.Role == models.RoleTechAdmin || u.Role == models.RoleBillingAdmin || u.Role == models.RoleSupportAdmin {
+			list = append(list, entry)
+		} else if u.Role == models.RoleTenant || u.Role == models.RoleClient {
+			if entry.TenantID == userID {
+				list = append(list, entry)
+			}
+		} else {
+			// Landlord, Agent, Caretaker, Staff
+			h.Store.RLock()
+			lease, hasLease := h.Store.Leases[entry.LeaseID]
+			var unitPropertyID string
+			if hasLease {
+				if unit, hasUnit := h.Store.Units[lease.UnitID]; hasUnit {
+					unitPropertyID = unit.PropertyID
+				}
+			}
+			h.Store.RUnlock()
+
+			if unitPropertyID != "" {
+				if CheckPropertyOwnership(h.Store, unitPropertyID, userID) == nil {
+					list = append(list, entry)
+				}
+			}
+		}
+	}
+
+	if list == nil {
+		list = []*models.LedgerEntry{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -526,10 +592,28 @@ func (h *SupportHandler) CreateApplication(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	h.Store.RLock()
+	listing, okListing := h.Store.Listings[req.ListingID]
+	h.Store.RUnlock()
+	if !okListing {
+		http.Error(w, "Listing not found", http.StatusNotFound)
+		return
+	}
+
 	req.ID = "app_" + uuid.New().String()
 	req.TenantID = userID
 	req.AppliedAt = time.Now()
 	req.Status = "pending"
+	req.ListingTitle = listing.Title
+
+	h.Store.RLock()
+	user, okUser := h.Store.Users[userID]
+	h.Store.RUnlock()
+	if okUser {
+		if req.Email == "" {
+			req.Email = user.Email
+		}
+	}
 
 	// Match logic:
 	// A simple heuristic for credit score & income to calculate match score
@@ -555,7 +639,7 @@ func (h *SupportHandler) CreateApplication(w http.ResponseWriter, r *http.Reques
 	// and matchScore is high (e.g. >= 80), automatically approve and create a lease!
 	autoApprove := false
 	h.Store.Lock()
-	listing, okListing := h.Store.Listings[req.ListingID]
+	listing, okListing = h.Store.Listings[req.ListingID]
 	if okListing {
 		if listing.ApplicationReviewMode == "auto" {
 			autoApprove = true
@@ -768,7 +852,69 @@ func (h *SupportHandler) ListViewings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list := h.Store.GetViewingsByStaffID(userID)
+	u, err := h.Store.GetUserByID(userID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
+	}
+
+	h.Store.RLock()
+	var rawViewings []*models.Viewing
+	for _, v := range h.Store.Viewings {
+		rawViewings = append(rawViewings, v)
+	}
+	h.Store.RUnlock()
+
+	var list []*models.Viewing
+	isAdmin := u.Role == models.RoleSuperAdmin || u.Role == models.RoleTechAdmin || u.Role == models.RoleSupportAdmin || u.Role == models.RoleBillingAdmin
+
+	if isAdmin {
+		list = rawViewings
+	} else if u.Role == models.RoleTenant || u.Role == models.RoleClient {
+		h.Store.RLock()
+		clientLeads := make(map[string]bool)
+		for _, l := range h.Store.Leads {
+			if l.ClientID == userID {
+				clientLeads[l.ID] = true
+			}
+		}
+		h.Store.RUnlock()
+
+		for _, v := range rawViewings {
+			if clientLeads[v.LeadID] {
+				list = append(list, v)
+			}
+		}
+	} else if u.Role == models.RoleStaff || u.Role == models.RoleCaretaker {
+		for _, v := range rawViewings {
+			if v.StaffID == userID {
+				list = append(list, v)
+			}
+		}
+	} else {
+		// Landlord / Agent
+		for _, v := range rawViewings {
+			h.Store.RLock()
+			lead, leadExists := h.Store.Leads[v.LeadID]
+			var listingPropertyID string
+			if leadExists {
+				if listing, listingExists := h.Store.Listings[lead.ListingID]; listingExists {
+					listingPropertyID = listing.PropertyID
+				}
+			}
+			h.Store.RUnlock()
+
+			if listingPropertyID != "" {
+				if CheckPropertyOwnership(h.Store, listingPropertyID, userID) == nil {
+					list = append(list, v)
+				}
+			}
+		}
+	}
+
+	if list == nil {
+		list = []*models.Viewing{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(list)

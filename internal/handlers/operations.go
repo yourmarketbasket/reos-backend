@@ -265,9 +265,56 @@ func (h *OperationsHandler) CreateBooking(w http.ResponseWriter, r *http.Request
 }
 
 func (h *OperationsHandler) ListBookings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := getUserIdFromAuthHeader(r, h.Store)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	u, err := h.Store.GetUserByID(userID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
+	}
+
 	bookings := h.Store.GetAllBookings()
+	var list []*models.Booking
+
+	isAdmin := u.Role == models.RoleSuperAdmin || u.Role == models.RoleTechAdmin || u.Role == models.RoleSupportAdmin || u.Role == models.RoleBillingAdmin
+
+	if isAdmin {
+		list = bookings
+	} else if u.Role == models.RoleTenant || u.Role == models.RoleClient {
+		for _, b := range bookings {
+			if b.ClientID == userID {
+				list = append(list, b)
+			}
+		}
+	} else {
+		// Landlord, Agent, Caretaker, Staff
+		for _, b := range bookings {
+			h.Store.RLock()
+			listing, ok := h.Store.Listings[b.ListingID]
+			h.Store.RUnlock()
+			if ok {
+				if CheckPropertyOwnership(h.Store, listing.PropertyID, userID) == nil {
+					list = append(list, b)
+				}
+			}
+		}
+	}
+
+	if list == nil {
+		list = []*models.Booking{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(bookings)
+	json.NewEncoder(w).Encode(list)
 }
 
 type InviteStaffReq struct {

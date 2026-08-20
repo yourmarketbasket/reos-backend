@@ -75,7 +75,9 @@ func loadEnv(filepath string) {
 			if strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"") {
 				val = val[1 : len(val)-1]
 			}
-			os.Setenv(key, val)
+			if os.Getenv(key) == "" {
+				os.Setenv(key, val)
+			}
 		}
 	}
 }
@@ -474,15 +476,19 @@ func (s *Store) writeDoc(collection string, id string, doc interface{}) {
 	if s.db == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	opts := options.Replace().SetUpsert(true)
-	filter := bson.M{"id": id}
-	_, err := s.db.Collection(collection).ReplaceOne(ctx, filter, doc, opts)
-	if err != nil {
-		fmt.Printf("Failed to write doc to MongoDB collection '%s' (ID: %s): %v\n", collection, id, err)
-	}
+	// Run MongoDB write asynchronously so callers never hold the mutex
+	// during a network operation. In-memory state is already updated before
+	// this call, so reads are never blocked waiting for persistence.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		opts := options.Replace().SetUpsert(true)
+		filter := bson.M{"id": id}
+		_, err := s.db.Collection(collection).ReplaceOne(ctx, filter, doc, opts)
+		if err != nil {
+			fmt.Printf("Failed to write doc to MongoDB collection '%s' (ID: %s): %v\n", collection, id, err)
+		}
+	}()
 }
 
 

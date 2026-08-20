@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/reos/api/internal/handlers"
+	"github.com/reos/api/internal/middleware"
 	"github.com/reos/api/internal/models"
 	"github.com/reos/api/internal/store"
 	"go.mongodb.org/mongo-driver/bson"
@@ -170,14 +171,14 @@ func main() {
 	jurisHandler := handlers.NewJurisdictionsHandler(dbStore)
 
 	// RBAC middle-tier filters
-	adminOnly := handlers.RequireRole(dbStore, models.RoleSuperAdmin)
-	caretakerOnly := handlers.RequireRole(dbStore, models.RoleCaretaker)
-	landlordOrAgentOnly := handlers.RequireRole(dbStore, models.RoleLandlord, models.RoleAgent)
-	landlordAgentOrStaffOnly := handlers.RequireRole(dbStore, models.RoleLandlord, models.RoleAgent, models.RoleStaff, models.RoleCaretaker)
-	anyAdmin := handlers.RequireRole(dbStore, models.RoleSuperAdmin, models.RoleSupportAdmin, models.RoleBillingAdmin, models.RoleTechAdmin)
+	adminOnly := middleware.RequireRole(dbStore, models.RoleSuperAdmin)
+	caretakerOnly := middleware.RequireRole(dbStore, models.RoleCaretaker)
+	landlordOrAgentOnly := middleware.RequireRole(dbStore, models.RoleLandlord, models.RoleAgent)
+	landlordAgentOrStaffOnly := middleware.RequireRole(dbStore, models.RoleLandlord, models.RoleAgent, models.RoleStaff, models.RoleCaretaker)
+	anyAdmin := middleware.RequireRole(dbStore, models.RoleSuperAdmin, models.RoleSupportAdmin, models.RoleBillingAdmin, models.RoleTechAdmin)
 	
 	// canInvite: superadmin + all platform admins + landlord + agent
-	canInvite := handlers.RequireRole(dbStore,
+	canInvite := middleware.RequireRole(dbStore,
 		models.RoleSuperAdmin, models.RoleTechAdmin, models.RoleSupportAdmin, models.RoleBillingAdmin,
 		models.RoleLandlord, models.RoleAgent,
 	)
@@ -308,9 +309,9 @@ func main() {
 	fmt.Printf("REOS Monolith API starting on %s...\n", port)
 
 	// Wrap serve multiplexer globally with rate limiting, security headers, and size limiters
-	globalHandler := handlers.SecurityHeaders(
-		handlers.DynamicRequestSizeLimit(
-			handlers.DynamicRateLimit(http.DefaultServeMux),
+	globalHandler := middleware.SecurityHeaders(
+		middleware.DynamicRequestSizeLimit(
+			middleware.DynamicRateLimit(http.DefaultServeMux),
 		),
 	)
 

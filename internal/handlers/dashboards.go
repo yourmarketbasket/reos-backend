@@ -462,34 +462,39 @@ func (h *DashboardsHandler) ListMaintenance(w http.ResponseWriter, r *http.Reque
 	}
 
 	h.Store.RLock()
-	defer h.Store.RUnlock()
+	var rawMaintenance []*models.Maintenance
+	for _, m := range h.Store.Maintenance {
+		rawMaintenance = append(rawMaintenance, m)
+	}
+	h.Store.RUnlock()
 
 	var list []*models.Maintenance
-	if u.Role == models.RoleTenant {
-		for _, m := range h.Store.Maintenance {
+	isAdmin := u.Role == models.RoleSuperAdmin || u.Role == models.RoleTechAdmin || u.Role == models.RoleSupportAdmin || u.Role == models.RoleBillingAdmin
+
+	for _, m := range rawMaintenance {
+		if isAdmin {
+			list = append(list, m)
+		} else if u.Role == models.RoleTenant || u.Role == models.RoleClient {
 			if m.ReportedBy == userID {
 				list = append(list, m)
 			}
-		}
-	} else if u.Role == models.RoleCaretaker {
-		for _, m := range h.Store.Maintenance {
-			if m.CaretakerID == userID {
-				list = append(list, m)
-			}
-		}
-	} else if u.Role == models.RoleLandlord {
-		// All tickets for units on landlord's properties
-		for _, m := range h.Store.Maintenance {
-			if unit, exists := h.Store.Units[m.UnitID]; exists {
-				if prop, propExists := h.Store.Properties[unit.PropertyID]; propExists && prop.OwnerID == userID {
+		} else if u.Role == models.RoleCaretaker && m.CaretakerID == userID {
+			list = append(list, m)
+		} else {
+			// Landlord, Agent, Staff
+			h.Store.RLock()
+			unit, hasUnit := h.Store.Units[m.UnitID]
+			h.Store.RUnlock()
+			if hasUnit {
+				if CheckPropertyOwnership(h.Store, unit.PropertyID, userID) == nil {
 					list = append(list, m)
 				}
 			}
 		}
-	} else {
-		for _, m := range h.Store.Maintenance {
-			list = append(list, m)
-		}
+	}
+
+	if list == nil {
+		list = []*models.Maintenance{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
